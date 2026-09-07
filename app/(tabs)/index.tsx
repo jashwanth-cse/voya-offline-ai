@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Href, useRouter } from 'expo-router';
 import { Colors } from '@/constants/colors';
@@ -11,6 +12,14 @@ export default function HomeScreen() {
   const router = useRouter();
   const context = useTravelStore(s => s.context);
   const places = useDestinationStore(s => s.places);
+  const counts = useDestinationStore(s => s.counts);
+  const refreshCounts = useDestinationStore(s => s.refreshCounts);
+
+  useEffect(() => {
+    if (context?.destination) {
+      refreshCounts(context.destination.toLowerCase());
+    }
+  }, [context?.destination, refreshCounts]);
 
   const tripDuration = context ? daysBetween(context.tripStartDate, context.tripEndDate) : 0;
   const remaining = context ? daysRemaining(context.tripEndDate) : 0;
@@ -101,7 +110,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Destination summary */}
-      {places.length > 0 && (
+      {(counts.total > 0 || places.length > 0) && (
         <>
           <Text style={styles.sectionTitle}>Destination Summary</Text>
           <View style={styles.summaryRow}>
@@ -109,17 +118,17 @@ export default function HomeScreen() {
               {
                 icon: '🏛️',
                 label: 'Attractions',
-                count: places.filter(p => p.category === 'attraction').length,
+                count: counts.attractions || places.filter(p => p.category === 'attraction').length,
               },
               {
                 icon: '🍽️',
                 label: 'Restaurants',
-                count: places.filter(p => p.category === 'restaurant').length,
+                count: counts.restaurants || places.filter(p => p.category === 'restaurant').length,
               },
               {
                 icon: '🏨',
                 label: 'Hotels',
-                count: places.filter(p => p.category === 'hotel').length,
+                count: counts.hotels || places.filter(p => p.category === 'hotel').length,
               },
             ].map(item => (
               <Card key={item.label} style={styles.summaryCard}>

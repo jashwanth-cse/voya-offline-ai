@@ -18,7 +18,7 @@ export default function DownloadScreen() {
   const router = useRouter();
   const context = useTravelStore(s => s.context);
   const setHasActiveTrip = useAppStore(s => s.setHasActiveTrip);
-  const loadMockDestination = useDestinationStore(s => s.loadMockDestination);
+  const initializeAndSeedPack = useDestinationStore(s => s.initializeAndSeedPack);
   const setDownloadProgress = useDestinationStore(s => s.setDownloadProgress);
 
   const progress = useRef(new Animated.Value(0)).current;
@@ -37,8 +37,16 @@ export default function DownloadScreen() {
 
         // Fade step text
         Animated.sequence([
-          Animated.timing(stepText, { toValue: 0, duration: 150, useNativeDriver: true }),
-          Animated.timing(stepText, { toValue: 1, duration: 200, useNativeDriver: true }),
+          Animated.timing(stepText, {
+            toValue: 0,
+            duration: 150,
+            useNativeDriver: true,
+          }),
+          Animated.timing(stepText, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
         ]).start();
 
         stepIndex.current = i;
@@ -59,9 +67,9 @@ export default function DownloadScreen() {
 
       if (!isMounted) return;
 
-      // Load mock data + mark trip active
+      // Initialize SQLite database and seed pack data
       if (context?.destination) {
-        loadMockDestination('madurai');
+        await initializeAndSeedPack(context.destination.toLowerCase());
       }
       setHasActiveTrip(true);
 
@@ -75,7 +83,7 @@ export default function DownloadScreen() {
     };
   }, [
     context,
-    loadMockDestination,
+    initializeAndSeedPack,
     setDownloadProgress,
     setHasActiveTrip,
     progress,
