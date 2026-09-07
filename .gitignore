@@ -1,0 +1,75 @@
+# =============================================================================
+# VOYA — .gitignore
+# React Native + Expo + TypeScript + Android
+# =============================================================================
+
+# -------------------------------------
+# Node.js
+# -------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+
+# -------------------------------------
+# Expo
+# -------------------------------------
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# -------------------------------------
+# Native — iOS (not used, Android-only)
+# -------------------------------------
+ios/
+
+# -------------------------------------
+# Native — Android (generated artifacts)
+# Keep android/ project files tracked.
+# Ignore build outputs only.
+# -------------------------------------
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+!android/app/debug.keystore
+
+# -------------------------------------
+# Secrets & Credentials
+# -------------------------------------
+.env
+.env.local
+.env.production
+.env.staging
+*.p8
+*.p12
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
+
+# -------------------------------------
+# TypeScript
+# -------------------------------------
+*.tsbuildinfo
+
+# -------------------------------------
+# Editor & OS
+# -------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.orig.*
+*.log
+
+# -------------------------------------
+# EAS / Expo
+# -------------------------------------
+.easignore
