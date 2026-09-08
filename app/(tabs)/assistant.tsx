@@ -17,6 +17,7 @@ import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { PlaceCard } from '@/components/place/PlaceCard';
 import { queryPlacesByConstraints } from '@/services/database';
 import { processTravelQuery, type TravelQueryResult } from '@/services/nativeIntelligence';
+import { rankPlaces, type RankedPlace } from '@/services/recommendationEngine';
 import { useTravelStore } from '@/stores/travelStore';
 import type { Place, PlaceCategory } from '@/types/travel';
 
@@ -25,7 +26,7 @@ interface Message {
   role: 'user' | 'assistant';
   text: string;
   result?: TravelQueryResult;
-  places?: Place[];
+  places?: RankedPlace[];
 }
 
 const QUICK_PROMPTS = [
@@ -71,12 +72,12 @@ export default function AssistantScreen() {
       const result = await processTravelQuery(query, context);
 
       // Fetch matching places from local destination database using multi-constraint engine
-      let matchedPlaces: Place[] = [];
+      let matchedPlaces: RankedPlace[] = [];
       const cat = (result.category as PlaceCategory) || undefined;
 
       if (result.intent !== 'off_topic') {
         try {
-          matchedPlaces = await queryPlacesByConstraints({
+          const rawMatches = await queryPlacesByConstraints({
             destinationId: context?.destination,
             category: cat,
             budgetMax: result.budgetMax,
@@ -85,6 +86,18 @@ export default function AssistantScreen() {
             distancePreference: result.distancePreference,
             userLat: context?.currentLatitude,
             userLon: context?.currentLongitude,
+            limit: 6,
+          });
+
+          // Score and rank using deterministic recommendation engine
+          matchedPlaces = rankPlaces(rawMatches, {
+            userLat: context?.currentLatitude,
+            userLon: context?.currentLongitude,
+            energyLevel: result.energyLevel || context?.energyLevel,
+            timeAvailableMinutes: result.timeAvailableMinutes,
+            budgetMax: result.budgetMax,
+            preferences: result.parsedIntent?.preferences,
+            visitedPlaces: context?.visitedPlaces,
             limit: 3,
           });
         } catch {
@@ -221,10 +234,13 @@ export default function AssistantScreen() {
             {item.places && item.places.length > 0 && (
               <View style={styles.placesContainer}>
                 <Text style={styles.placesHeader}>Recommended from your offline guide:</Text>
-                {item.places.map((place: Place) => (
+                {item.places.map((place: RankedPlace) => (
                   <PlaceCard
                     key={place.id}
                     place={place}
+                    distanceKm={place.distanceKm}
+                    matchScore={place.matchScore}
+                    matchReasons={place.matchReasons}
                     isSaved={savedPlaces.includes(place.id)}
                     onSave={() => toggleSave(place.id)}
                     onPress={() => openMap(place)}

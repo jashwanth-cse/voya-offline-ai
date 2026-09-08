@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Linking,
   StyleSheet,
   Text,
   TextInput,
@@ -9,13 +10,18 @@ import {
   View,
 } from 'react-native';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
+import { CompassNavigator } from '@/components/navigation/CompassNavigator';
 import { PlaceCard } from '@/components/place/PlaceCard';
 import { Colors } from '@/constants/colors';
+import { updateLocation } from '@/services/locationService';
+import { rankPlaces, type RankedPlace } from '@/services/recommendationEngine';
 import { useDestinationStore } from '@/stores/destinationStore';
 import { useTravelStore } from '@/stores/travelStore';
-import type { PlaceCategory } from '@/types/travel';
+import type { Place, PlaceCategory } from '@/types/travel';
+import { bearingToCardinal, calculateBearing } from '@/utils/geo';
 
 type Filter = 'all' | PlaceCategory;
+type SortMode = 'ai_match' | 'rating' | 'distance';
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -27,23 +33,96 @@ const FILTERS: { key: Filter; label: string }[] = [
 export default function ExploreScreen() {
   const [activeFilter, setActiveFilter] = useState<Filter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>('ai_match');
 
   const destinationId = useDestinationStore(s => s.destinationId);
   const places = useDestinationStore(s => s.places);
   const searchPlaces = useDestinationStore(s => s.searchPlaces);
   const isLoading = useDestinationStore(s => s.isLoading);
 
+  const context = useTravelStore(s => s.context);
+  const activeNavigationTarget = useTravelStore(s => s.activeNavigationTarget);
+  const setNavigationTarget = useTravelStore(s => s.setNavigationTarget);
   const toggleSaved = useTravelStore(s => s.toggleSaved);
-  const savedPlaces = useTravelStore(s => s.context?.savedPlaces ?? []);
+  const savedPlaces = context?.savedPlaces ?? [];
+
+  const userLat = context?.currentLatitude;
+  const userLon = context?.currentLongitude;
+
+  // Initialize simulated position near first place if unset
+  useEffect(() => {
+    if (places.length > 0 && (userLat == null || userLon == null)) {
+      updateLocation({
+        latitude: places[0].latitude - 0.006,
+        longitude: places[0].longitude - 0.006,
+        heading: 0,
+      });
+    }
+  }, [places, userLat, userLon]);
 
   useEffect(() => {
     const category = activeFilter === 'all' ? undefined : activeFilter;
     searchPlaces(searchQuery, destinationId ?? undefined, category);
   }, [activeFilter, searchQuery, destinationId, searchPlaces]);
 
+  // Apply deterministic recommendation engine ranking
+  const rankedPlaces = useMemo<RankedPlace[]>(() => {
+    const ranked = rankPlaces(places, {
+      userLat: context?.currentLatitude,
+      userLon: context?.currentLongitude,
+      energyLevel: context?.energyLevel,
+      visitedPlaces: context?.visitedPlaces,
+      limit: 100,
+    });
+
+    if (sortMode === 'rating') {
+      return [...ranked].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    }
+    if (sortMode === 'distance') {
+      return [...ranked].sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+    }
+    return ranked;
+  }, [places, context, sortMode]);
+
+  function openMap(place: RankedPlace) {
+    if (place.googleMapsUrl) {
+      Linking.openURL(place.googleMapsUrl);
+    } else {
+      const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        `${place.name} ${place.address ?? ''}`
+      )}`;
+      Linking.openURL(url);
+    }
+  }
+
+  function handleStartNav(place: Place) {
+    setNavigationTarget(place);
+  }
+
   return (
     <View style={styles.container}>
       <ScreenHeader title="Explore" />
+
+      {/* Active Navigation Panel */}
+      {activeNavigationTarget && (
+        <CompassNavigator
+          target={activeNavigationTarget}
+          onClose={() => setNavigationTarget(null)}
+        />
+      )}
+
+      {/* GPS Status Banner */}
+      <View style={styles.gpsBanner}>
+        <View style={styles.gpsIndicator}>
+          <View style={styles.gpsDot} />
+          <Text style={styles.gpsText}>
+            {userLat != null && userLon != null
+              ? `GPS: ${userLat.toFixed(4)}, ${userLon.toFixed(4)}`
+              : 'GPS: Offline Fixed Mode'}
+          </Text>
+        </View>
+        <Text style={styles.airplaneBadge}>✈️ 100% OFFLINE</Text>
+      </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
@@ -86,16 +165,44 @@ export default function ExploreScreen() {
         ))}
       </View>
 
-      {/* Results count / loader */}
+      {/* Sorting / Status Row */}
       <View style={styles.statusRow}>
         <Text style={styles.resultCount}>
-          {places.length} {places.length === 1 ? 'place' : 'places'} found
+          {rankedPlaces.length} {rankedPlaces.length === 1 ? 'place' : 'places'}
         </Text>
+
+        <View style={styles.sortToggleRow}>
+          <TouchableOpacity
+            onPress={() => setSortMode('ai_match')}
+            style={[styles.sortChip, sortMode === 'ai_match' && styles.sortChipActive]}
+          >
+            <Text style={[styles.sortText, sortMode === 'ai_match' && styles.sortTextActive]}>
+              ⚡ AI Ranked
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setSortMode('rating')}
+            style={[styles.sortChip, sortMode === 'rating' && styles.sortChipActive]}
+          >
+            <Text style={[styles.sortText, sortMode === 'rating' && styles.sortTextActive]}>
+              ⭐ Rating
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setSortMode('distance')}
+            style={[styles.sortChip, sortMode === 'distance' && styles.sortChipActive]}
+          >
+            <Text style={[styles.sortText, sortMode === 'distance' && styles.sortTextActive]}>
+              📍 Distance
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {isLoading && <ActivityIndicator size="small" color={Colors.primary} />}
       </View>
 
       {/* Places list */}
-      {places.length === 0 ? (
+      {rankedPlaces.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>📍</Text>
           <Text style={styles.emptyText}>
@@ -111,15 +218,30 @@ export default function ExploreScreen() {
         </View>
       ) : (
         <FlatList
-          data={places}
+          data={rankedPlaces}
           keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <PlaceCard
-              place={item}
-              isSaved={savedPlaces.includes(item.id)}
-              onSave={() => toggleSaved(item.id)}
-            />
-          )}
+          renderItem={({ item }) => {
+            const cardinal =
+              userLat != null && userLon != null
+                ? bearingToCardinal(
+                    calculateBearing(userLat, userLon, item.latitude, item.longitude)
+                  )
+                : undefined;
+
+            return (
+              <PlaceCard
+                place={item}
+                distanceKm={item.distanceKm}
+                bearingCardinal={cardinal}
+                matchScore={item.matchScore}
+                matchReasons={item.matchReasons}
+                isSaved={savedPlaces.includes(item.id)}
+                onSave={() => toggleSaved(item.id)}
+                onPress={() => openMap(item)}
+                onNavigate={() => handleStartNav(item)}
+              />
+            );
+          }}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
         />
@@ -179,15 +301,74 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   resultCount: {
     fontSize: 12,
     color: Colors.textMuted,
     fontWeight: '600',
   },
+  sortToggleRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  sortChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  sortChipActive: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: Colors.accent,
+  },
+  sortText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    fontWeight: '500',
+  },
+  sortTextActive: {
+    color: Colors.accent,
+    fontWeight: '700',
+  },
   list: { paddingBottom: 24 },
+  gpsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(99, 102, 241, 0.2)',
+  },
+  gpsIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  gpsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+  },
+  gpsText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  airplaneBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: Colors.primary,
+    letterSpacing: 0.5,
+  },
   empty: {
     flex: 1,
     alignItems: 'center',
