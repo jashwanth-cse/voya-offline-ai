@@ -19,6 +19,12 @@ export function getTourismServiceBaseUrl(): string {
   return 'http://localhost:8001';
 }
 
+const API_HEADERS: HeadersInit = {
+  'ngrok-skip-browser-warning': 'true',
+  'User-Agent': 'VOYA-App/1.0',
+  Accept: 'application/json',
+};
+
 /**
  * Checks if the FastAPI tourism-service is online and healthy.
  */
@@ -26,9 +32,10 @@ export async function checkTourismHealth(): Promise<boolean> {
   const baseUrl = getTourismServiceBaseUrl();
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
     const res = await fetch(`${baseUrl}/health`, {
+      headers: API_HEADERS,
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -120,9 +127,12 @@ export async function fetchCityTourismData(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    const res = await fetch(endpoint, { signal: controller.signal });
+    const res = await fetch(endpoint, {
+      headers: API_HEADERS,
+      signal: controller.signal,
+    });
     clearTimeout(timeoutId);
 
     if (res.ok) {

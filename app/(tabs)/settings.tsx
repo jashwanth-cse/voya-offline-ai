@@ -1,13 +1,19 @@
+import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Href, useRouter } from 'expo-router';
-import { Colors } from '@/constants/colors';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Colors } from '@/constants/colors';
+import {
+  addModelStateListener,
+  getMemoryUsage,
+  type MemoryUsageStats,
+} from '@/services/nativeIntelligence';
 import { useAppStore } from '@/stores/appStore';
 import { useDestinationStore } from '@/stores/destinationStore';
 import { useTravelStore } from '@/stores/travelStore';
-import type { TravelContext } from '@/types/travel';
+import type { ModelState, TravelContext } from '@/types/travel';
 import { formatDate } from '@/utils/date';
 
 type EnergyLevel = NonNullable<TravelContext['energyLevel']>;
@@ -25,6 +31,22 @@ export default function SettingsScreen() {
   const clearContext = useTravelStore(s => s.clearContext);
   const endTrip = useAppStore(s => s.endTrip);
   const clearDestination = useDestinationStore(s => s.clearDestination);
+
+  const [memoryStats, setMemoryStats] = useState<MemoryUsageStats | null>(null);
+  const [modelState, setModelState] = useState<ModelState>('IDLE');
+
+  useEffect(() => {
+    getMemoryUsage().then(stats => {
+      setMemoryStats(stats);
+      setModelState(stats.modelState);
+    });
+
+    const sub = addModelStateListener(state => {
+      setModelState(state);
+    });
+
+    return () => sub.remove();
+  }, []);
 
   function handleEnergyChange(level: EnergyLevel) {
     updateContext({ energyLevel: level });
@@ -94,22 +116,42 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
+        {/* Native Module & Memory Telemetry */}
+        <Text style={styles.sectionLabel}>ON-DEVICE AI RUNTIME</Text>
+        <Card style={styles.card}>
+          <Row label="Native Module" value="VoyaIntelligenceModule" />
+          <Row label="Model State" value={modelState} />
+          <Row label="Memory Policy" value="Single-Model Kotlin Mutex" />
+          {memoryStats && (
+            <>
+              <Row
+                label="Available Device RAM"
+                value={`${memoryStats.availMemMb} MB / ${memoryStats.totalMemMb} MB`}
+              />
+              <Row
+                label="Native Heap Allocated"
+                value={`${memoryStats.nativeHeapAllocatedMb} MB`}
+              />
+            </>
+          )}
+        </Card>
+
         {/* Destination Pack Details */}
         <Text style={styles.sectionLabel}>INTELLIGENCE PACK</Text>
         <Card style={styles.card}>
           <Row label="Pack Status" value="✓ Installed Offline" />
           <Row label="Pack Version" value="v1.0.0" />
-          <Row label="FastAPI Tourism" value="Enabled" />
+          <Row label="FastAPI Backend" value="Live Connected" />
           <Row label="Offline Database" value="SQLite (WAL Mode)" />
         </Card>
 
-        {/* Phase info */}
+        {/* Phase Info */}
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <Card style={styles.card}>
-          <Row label="Phase" value="3 — Destination Intelligence Pack" />
-          <Row label="AI Status" value="Offline (Phase 5)" />
-          <Row label="Vision" value="Offline (Phase 9)" />
-          <Row label="GPS" value="Offline (Phase 8)" />
+          <Row label="Phase" value="4 — Native Module Foundation" />
+          <Row label="GenAI Engine" value="Gemma 2B (Phase 5)" />
+          <Row label="Vision Engine" value="MediaPipe Vision (Phase 9)" />
+          <Row label="Architecture" value="React Native + Kotlin TurboBridge" />
         </Card>
 
         {/* End Trip */}
@@ -165,7 +207,12 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   card: { marginBottom: 4 },
-  cardDesc: { fontSize: 13, color: Colors.textSecondary, marginBottom: 14, lineHeight: 19 },
+  cardDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginBottom: 14,
+    lineHeight: 19,
+  },
   energyRow: { flexDirection: 'row', gap: 8 },
   energyBtn: {
     flex: 1,
@@ -176,7 +223,10 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     alignItems: 'center',
   },
-  energyBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  energyBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
   energyText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
   energyTextActive: { color: Colors.textPrimary },
   endTripBtn: { marginTop: 32, borderColor: Colors.error },
