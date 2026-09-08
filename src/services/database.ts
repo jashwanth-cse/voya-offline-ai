@@ -207,6 +207,108 @@ export interface PlaceFilters {
   offset?: number;
 }
 
+export interface TravelConstraints {
+  destinationId?: string;
+  category?: PlaceCategory;
+  budgetMax?: number;
+  timeAvailableMinutes?: number;
+  energyLevel?: 'low' | 'medium' | 'high' | string;
+  preferences?: string[];
+  distancePreference?: 'nearby' | 'any' | string;
+  userLat?: number;
+  userLon?: number;
+  limit?: number;
+}
+
+/**
+ * Queries places matching structured travel constraints (budget, time, energy, distance, category).
+ * Includes graceful relaxation fallback if specific constraints yield 0 results.
+ */
+export async function queryPlacesByConstraints(
+  constraints: TravelConstraints = {}
+): Promise<Place[]> {
+  const db = await getDatabase();
+  const limit = constraints.limit ?? 4;
+
+  // 1. If nearby distance requested and GPS coordinates present, use spatial query
+  if (
+    constraints.distancePreference === 'nearby' &&
+    constraints.userLat != null &&
+    constraints.userLon != null
+  ) {
+    const nearby = await queryNearbyPlaces(
+      constraints.userLat,
+      constraints.userLon,
+      15,
+      constraints.category,
+      limit
+    );
+    if (nearby.length > 0) return nearby;
+  }
+
+  // 2. Build multi-constraint SQL query
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (constraints.destinationId) {
+    conditions.push('destination_id = ?');
+    params.push(constraints.destinationId.toLowerCase());
+  }
+
+  if (constraints.category) {
+    conditions.push('category = ?');
+    params.push(constraints.category);
+  }
+
+  if (constraints.timeAvailableMinutes && constraints.timeAvailableMinutes > 0) {
+    conditions.push(
+      '(estimated_visit_duration_minutes IS NULL OR estimated_visit_duration_minutes <= ?)'
+    );
+    params.push(constraints.timeAvailableMinutes);
+  }
+
+  if (constraints.preferences && constraints.preferences.length > 0) {
+    const prefConditions = constraints.preferences.map(
+      () => '(name LIKE ? OR description LIKE ? OR cuisine LIKE ?)'
+    );
+    conditions.push(`(${prefConditions.join(' OR ')})`);
+    for (const pref of constraints.preferences) {
+      const p = `%${pref}%`;
+      params.push(p, p, p);
+    }
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const sql = `
+    SELECT * FROM places
+    ${whereClause}
+    ORDER BY rating DESC, name ASC
+    LIMIT ${limit};
+  `;
+
+  let rows = await db.getAllAsync<PlaceRow>(sql, params);
+
+  // 3. Graceful fallback relaxation if strict constraints returned zero results
+  if (rows.length === 0 && constraints.destinationId) {
+    // Relax: query by category + destination only
+    if (constraints.category) {
+      rows = await db.getAllAsync<PlaceRow>(
+        `SELECT * FROM places WHERE destination_id = ? AND category = ? ORDER BY rating DESC LIMIT ${limit};`,
+        [constraints.destinationId.toLowerCase(), constraints.category]
+      );
+    }
+    // If still empty, return top rated attractions overall in this destination
+    if (rows.length === 0) {
+      rows = await db.getAllAsync<PlaceRow>(
+        `SELECT * FROM places WHERE destination_id = ? ORDER BY rating DESC LIMIT ${limit};`,
+        [constraints.destinationId.toLowerCase()]
+      );
+    }
+  }
+
+  return rows.map(mapRowToPlace);
+}
+
 /**
  * Queries places with optional category, search keyword, rating filter, and pagination.
  */

@@ -15,8 +15,10 @@ export interface TravelQueryResult {
   intent: string;
   category?: PlaceCategory | string;
   timeAvailableMinutes?: number;
+  budgetMax?: number;
   energyLevel?: 'low' | 'medium' | 'high' | string;
   distancePreference?: 'nearby' | 'any' | string;
+  suggestedQuestions?: string[];
   status: 'SUCCESS' | 'ERROR';
   latencyMs: number;
   modelUsed?: string;
@@ -68,42 +70,107 @@ export async function initializeGenAI(): Promise<ModelState> {
  */
 function parseJsFallback(query: string, context?: TravelContext | null): TravelQueryResult {
   const q = query.toLowerCase();
+  const dest = context?.destination ?? 'your destination';
+
+  // Check for off-topic queries
+  const isOffTopic =
+    q.includes('who is ') ||
+    q.includes('python') ||
+    q.includes('code') ||
+    q.includes('recipe') ||
+    q.includes('math') ||
+    q.includes('write an essay') ||
+    q.includes('capital of') ||
+    q.includes('weather in tokyo') ||
+    q.includes('what is javascript');
+
+  if (isOffTopic) {
+    const suggestions = [
+      `What are the top attractions in ${dest}?`,
+      `Where can I find famous local food in ${dest}?`,
+      `Suggest a 2-hour historical tour in ${dest}`,
+    ];
+    return {
+      rawResponse: JSON.stringify({ intent: 'off_topic', suggested_questions: suggestions }),
+      reply: `I am your offline travel companion specialized exclusively for ${dest}. Here are travel questions I can help you with:`,
+      intent: 'off_topic',
+      suggestedQuestions: suggestions,
+      status: 'SUCCESS',
+      latencyMs: 8,
+      modelUsed: 'Offline-JS-Fallback',
+      parsedIntent: { intent: 'off_topic', suggested_questions: suggestions },
+    };
+  }
+
   let intent = 'explore';
   let category: PlaceCategory | undefined = undefined;
-  let reply = `Here are recommendations for ${context?.destination ?? 'your destination'}.`;
+  let reply = `Here are recommendations for ${dest}:`;
+  let suggestedQuestions = [
+    `Top 3 must-visit places in ${dest}`,
+    `Best evening sunset spots`,
+    `Local shopping and markets in ${dest}`,
+  ];
 
   if (
     q.includes('eat') ||
     q.includes('food') ||
     q.includes('restaurant') ||
     q.includes('lunch') ||
-    q.includes('dinner')
+    q.includes('dinner') ||
+    q.includes('breakfast')
   ) {
     intent = 'food';
     category = 'restaurant';
-    reply = `Looking up the best local food and restaurants in ${context?.destination ?? 'town'}.`;
-  } else if (q.includes('hotel') || q.includes('stay') || q.includes('lodge')) {
+    reply = `Looking up the best local food and restaurants in ${dest}.`;
+    suggestedQuestions = [
+      `Budget food under ₹300 in ${dest}`,
+      `Famous traditional breakfast in ${dest}`,
+      `Best dinner spots with high ratings`,
+    ];
+  } else if (
+    q.includes('hotel') ||
+    q.includes('stay') ||
+    q.includes('lodge') ||
+    q.includes('resort')
+  ) {
     intent = 'recommend_places';
     category = 'hotel';
-    reply = `Found top rated accommodations and hotels in ${context?.destination ?? 'the area'}.`;
+    reply = `Found top rated accommodations and hotels in ${dest}.`;
+    suggestedQuestions = [
+      `Top-rated hotels in ${dest}`,
+      `Budget stays near center`,
+      `Resorts and peaceful stays`,
+    ];
   } else if (
     q.includes('near') ||
     q.includes('close') ||
     q.includes('around') ||
-    q.includes('direction')
+    q.includes('direction') ||
+    q.includes('how to go')
   ) {
     intent = 'navigate';
     category = 'attraction';
-    reply = `Calculating closest places from your current location.`;
+    reply = `Calculating closest places from your current location in ${dest}.`;
+    suggestedQuestions = [
+      `Quick 30 min spots nearby`,
+      `Walking tour from here`,
+      `Famous landmarks within 5 km`,
+    ];
   } else if (
     q.includes('history') ||
     q.includes('temple') ||
     q.includes('palace') ||
-    q.includes('monument')
+    q.includes('monument') ||
+    q.includes('heritage')
   ) {
     intent = 'recommend_places';
     category = 'landmark';
-    reply = `Showing famous heritage monuments and historical landmarks.`;
+    reply = `Showing famous heritage monuments and historical landmarks in ${dest}.`;
+    suggestedQuestions = [
+      `Oldest temples in ${dest}`,
+      `2-hour heritage walking trail`,
+      `Iconic photo spots and architecture`,
+    ];
   }
 
   const timeMin = q.includes('1 hour')
@@ -114,12 +181,22 @@ function parseJsFallback(query: string, context?: TravelContext | null): TravelQ
         ? 30
         : undefined;
 
+  let budgetMax: number | undefined = undefined;
+  const budgetMatch = q.match(/(?:under|below|budget|less than|within|₹|rs\.?|inr)\s*(\d{2,5})/);
+  if (budgetMatch) {
+    budgetMax = parseInt(budgetMatch[1], 10);
+  } else if (q.includes('cheap')) {
+    budgetMax = 300;
+  }
+
   const parsedIntent: TravelIntent = {
     intent,
     category,
     time_available_minutes: timeMin,
+    budget_max: budgetMax,
     distance_preference: q.includes('near') ? 'nearby' : 'any',
     energy_level: context?.energyLevel ?? 'medium',
+    suggested_questions: suggestedQuestions,
   };
 
   return {
@@ -128,8 +205,10 @@ function parseJsFallback(query: string, context?: TravelContext | null): TravelQ
     intent,
     category,
     timeAvailableMinutes: timeMin,
+    budgetMax,
     energyLevel: context?.energyLevel ?? 'medium',
     distancePreference: q.includes('near') ? 'nearby' : 'any',
+    suggestedQuestions,
     status: 'SUCCESS',
     latencyMs: 14,
     modelUsed: 'Offline-JS-Fallback',
@@ -155,8 +234,10 @@ export async function processTravelQuery(
           res.timeAvailableMinutes && res.timeAvailableMinutes > 0
             ? res.timeAvailableMinutes
             : undefined,
+        budget_max: res.budgetMax && res.budgetMax > 0 ? res.budgetMax : undefined,
         energy_level: (res.energyLevel as 'low' | 'medium' | 'high') || undefined,
         distance_preference: (res.distancePreference as 'nearby' | 'any') || 'any',
+        suggested_questions: res.suggestedQuestions,
       };
       return {
         ...res,

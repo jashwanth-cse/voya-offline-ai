@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,14 +14,18 @@ import {
 } from 'react-native';
 import { Colors } from '@/constants/colors';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
+import { PlaceCard } from '@/components/place/PlaceCard';
+import { queryPlacesByConstraints } from '@/services/database';
 import { processTravelQuery, type TravelQueryResult } from '@/services/nativeIntelligence';
 import { useTravelStore } from '@/stores/travelStore';
+import type { Place, PlaceCategory } from '@/types/travel';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   result?: TravelQueryResult;
+  places?: Place[];
 }
 
 const QUICK_PROMPTS = [
@@ -32,6 +37,9 @@ const QUICK_PROMPTS = [
 
 export default function AssistantScreen() {
   const context = useTravelStore(s => s.context);
+  const toggleSaved = useTravelStore(s => s.toggleSaved);
+  const savedPlaces = context?.savedPlaces ?? [];
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '0',
@@ -61,11 +69,35 @@ export default function AssistantScreen() {
 
     try {
       const result = await processTravelQuery(query, context);
+
+      // Fetch matching places from local destination database using multi-constraint engine
+      let matchedPlaces: Place[] = [];
+      const cat = (result.category as PlaceCategory) || undefined;
+
+      if (result.intent !== 'off_topic') {
+        try {
+          matchedPlaces = await queryPlacesByConstraints({
+            destinationId: context?.destination,
+            category: cat,
+            budgetMax: result.budgetMax,
+            timeAvailableMinutes: result.timeAvailableMinutes,
+            energyLevel: result.energyLevel || context?.energyLevel,
+            distancePreference: result.distancePreference,
+            userLat: context?.currentLatitude,
+            userLon: context?.currentLongitude,
+            limit: 3,
+          });
+        } catch {
+          matchedPlaces = [];
+        }
+      }
+
       const asstMsg: Message = {
         id: `asst-${Date.now()}`,
         role: 'assistant',
         text: result.reply || result.rawResponse,
         result,
+        places: matchedPlaces.length > 0 ? matchedPlaces : undefined,
       };
       setMessages(prev => [...prev, asstMsg]);
     } catch {
@@ -78,6 +110,21 @@ export default function AssistantScreen() {
     } finally {
       setIsLoading(false);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }
+
+  function toggleSave(placeId: string) {
+    toggleSaved(placeId);
+  }
+
+  function openMap(place: Place) {
+    if (place.googleMapsUrl) {
+      Linking.openURL(place.googleMapsUrl);
+    } else {
+      const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        `${place.name} ${place.address ?? ''}`
+      )}`;
+      Linking.openURL(url);
     }
   }
 
@@ -107,25 +154,82 @@ export default function AssistantScreen() {
         contentContainerStyle={styles.messageList}
         renderItem={({ item }) => (
           <View
-            style={[styles.bubble, item.role === 'user' ? styles.userBubble : styles.asstBubble]}
+            style={[
+              styles.bubbleContainer,
+              item.role === 'user' ? styles.userContainer : styles.asstContainer,
+            ]}
           >
-            <Text style={[styles.bubbleText, item.role === 'user' && styles.userText]}>
-              {item.text}
-            </Text>
+            <View
+              style={[styles.bubble, item.role === 'user' ? styles.userBubble : styles.asstBubble]}
+            >
+              <Text style={[styles.bubbleText, item.role === 'user' && styles.userText]}>
+                {item.text}
+              </Text>
 
-            {item.role === 'assistant' && item.result && (
-              <View style={styles.metaRow}>
-                <View style={styles.intentBadge}>
-                  <Text style={styles.intentText}>
-                    🏷️ {item.result.intent}
-                    {item.result.category ? ` · ${item.result.category}` : ''}
-                  </Text>
+              {item.role === 'assistant' && item.result && (
+                <View style={styles.metaRow}>
+                  <View
+                    style={[
+                      styles.intentBadge,
+                      item.result.intent === 'off_topic' && styles.offTopicBadge,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.intentText,
+                        item.result.intent === 'off_topic' && styles.offTopicText,
+                      ]}
+                    >
+                      {item.result.intent === 'off_topic'
+                        ? '🛡️ Destination Guide Scope'
+                        : `🏷️ ${item.result.intent}${item.result.category ? ` · ${item.result.category}` : ''}`}
+                    </Text>
+                  </View>
+                  <View style={styles.latencyPill}>
+                    <Text style={styles.latencyText}>
+                      ⚡ {Math.round(item.result.latencyMs)}ms ·{' '}
+                      {item.result.modelUsed ?? 'Offline'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.latencyPill}>
-                  <Text style={styles.latencyText}>
-                    ⚡ {Math.round(item.result.latencyMs)}ms · {item.result.modelUsed ?? 'Offline'}
-                  </Text>
+              )}
+            </View>
+
+            {/* Smart Suggested Question Chips */}
+            {item.role === 'assistant' &&
+              item.result?.suggestedQuestions &&
+              item.result.suggestedQuestions.length > 0 && (
+                <View style={styles.suggestionsContainer}>
+                  <Text style={styles.suggestionsHeader}>💡 Suggested for you:</Text>
+                  <View style={styles.suggestionsList}>
+                    {item.result.suggestedQuestions.map((q: string, idx: number) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={styles.suggestionChip}
+                        onPress={() => handleSend(q)}
+                        activeOpacity={0.7}
+                        disabled={isLoading}
+                      >
+                        <Text style={styles.suggestionText}>{q} →</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
+              )}
+
+            {/* Embedded Recommended Places from Local Database */}
+            {item.places && item.places.length > 0 && (
+              <View style={styles.placesContainer}>
+                <Text style={styles.placesHeader}>Recommended from your offline guide:</Text>
+                {item.places.map((place: Place) => (
+                  <PlaceCard
+                    key={place.id}
+                    place={place}
+                    isSaved={savedPlaces.includes(place.id)}
+                    onSave={() => toggleSave(place.id)}
+                    onPress={() => openMap(place)}
+                  />
+                ))}
               </View>
             )}
           </View>
@@ -198,11 +302,20 @@ const styles = StyleSheet.create({
   },
   contextText: { fontSize: 12, color: Colors.textSecondary },
   messageList: { padding: 16, paddingBottom: 8 },
+  bubbleContainer: {
+    marginVertical: 6,
+    width: '100%',
+  },
+  userContainer: {
+    alignItems: 'flex-end',
+  },
+  asstContainer: {
+    alignItems: 'flex-start',
+  },
   bubble: {
     maxWidth: '85%',
     borderRadius: 16,
     padding: 12,
-    marginVertical: 6,
   },
   asstBubble: {
     backgroundColor: Colors.card,
@@ -218,6 +331,53 @@ const styles = StyleSheet.create({
   },
   bubbleText: { fontSize: 14, color: Colors.textSecondary, lineHeight: 21 },
   userText: { color: Colors.textPrimary },
+  placesContainer: {
+    width: '100%',
+    marginTop: 8,
+    paddingLeft: 4,
+  },
+  placesHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.accent,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  offTopicBadge: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  offTopicText: {
+    color: '#ef4444',
+  },
+  suggestionsContainer: {
+    width: '100%',
+    marginTop: 8,
+    paddingLeft: 4,
+  },
+  suggestionsHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.accent,
+    marginBottom: 6,
+  },
+  suggestionsList: {
+    gap: 6,
+  },
+  suggestionChip: {
+    backgroundColor: Colors.cardElevated,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignSelf: 'flex-start',
+  },
+  suggestionText: {
+    fontSize: 12,
+    color: Colors.primaryLight,
+    fontWeight: '600',
+  },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',

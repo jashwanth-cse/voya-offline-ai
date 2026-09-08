@@ -83,4 +83,5 @@ export interface TravelIntent {
   distance_preference?: 'nearby' | 'any';
   budget_max?: number;
   category?: PlaceCategory;
+  suggested_questions?: string[];
 }

@@ -67,14 +67,21 @@ class VoyaIntelligenceModule(private val reactContext: ReactApplicationContext) 
 
             try {
                 val inferenceResult = lifecycleManager.gemmaEngine.infer(query, contextJson)
+                val suggestionsList = (inferenceResult["suggestedQuestions"] as? List<*>) ?: emptyList<String>()
+                val suggestionsArray = Arguments.createArray().apply {
+                    suggestionsList.forEach { pushString(it.toString()) }
+                }
+
                 val responseMap: WritableMap = Arguments.createMap().apply {
                     putString("rawResponse", inferenceResult["rawResponse"] as? String ?: "")
                     putString("reply", inferenceResult["reply"] as? String ?: "")
                     putString("intent", inferenceResult["intent"] as? String ?: "explore")
                     putString("category", inferenceResult["category"] as? String ?: "")
                     putInt("timeAvailableMinutes", (inferenceResult["timeAvailableMinutes"] as? Int) ?: -1)
+                    putInt("budgetMax", (inferenceResult["budgetMax"] as? Int) ?: -1)
                     putString("energyLevel", inferenceResult["energyLevel"] as? String ?: "")
                     putString("distancePreference", inferenceResult["distancePreference"] as? String ?: "any")
+                    putArray("suggestedQuestions", suggestionsArray)
                     putString("status", inferenceResult["status"] as? String ?: "SUCCESS")
                     putDouble("latencyMs", (inferenceResult["latencyMs"] as? Double) ?: 0.0)
                     putString("modelUsed", inferenceResult["modelUsed"] as? String ?: "Offline-Engine")
