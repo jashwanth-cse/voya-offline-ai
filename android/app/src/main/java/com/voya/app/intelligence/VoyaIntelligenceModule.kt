@@ -60,19 +60,29 @@ class VoyaIntelligenceModule(private val reactContext: ReactApplicationContext) 
             if (lifecycleManager.getState() != ModelState.GENAI_ACTIVE) {
                 val acquire = lifecycleManager.acquireGenAI()
                 if (acquire.isFailure) {
-                    promise.reject("GENAI_NOT_READY", "Failed to acquire GenAI session.")
+                    promise.reject("GENAI_NOT_READY", "Failed to acquire GenAI session: ${acquire.exceptionOrNull()?.message}")
                     return@launch
                 }
             }
 
-            // Phase 4 returns structured placeholder; Phase 5 connects Gemma inference
-            val responseMap: WritableMap = Arguments.createMap().apply {
-                putString("rawResponse", "Offline AI ready. Model execution connects in Phase 5.")
-                putString("intent", "explore")
-                putString("status", "SUCCESS")
-                putDouble("latencyMs", 12.0)
+            try {
+                val inferenceResult = lifecycleManager.gemmaEngine.infer(query, contextJson)
+                val responseMap: WritableMap = Arguments.createMap().apply {
+                    putString("rawResponse", inferenceResult["rawResponse"] as? String ?: "")
+                    putString("reply", inferenceResult["reply"] as? String ?: "")
+                    putString("intent", inferenceResult["intent"] as? String ?: "explore")
+                    putString("category", inferenceResult["category"] as? String ?: "")
+                    putInt("timeAvailableMinutes", (inferenceResult["timeAvailableMinutes"] as? Int) ?: -1)
+                    putString("energyLevel", inferenceResult["energyLevel"] as? String ?: "")
+                    putString("distancePreference", inferenceResult["distancePreference"] as? String ?: "any")
+                    putString("status", inferenceResult["status"] as? String ?: "SUCCESS")
+                    putDouble("latencyMs", (inferenceResult["latencyMs"] as? Double) ?: 0.0)
+                    putString("modelUsed", inferenceResult["modelUsed"] as? String ?: "Offline-Engine")
+                }
+                promise.resolve(responseMap)
+            } catch (e: Exception) {
+                promise.reject("INFERENCE_ERROR", "Gemma query execution failed: ${e.message}", e)
             }
-            promise.resolve(responseMap)
         }
     }
 

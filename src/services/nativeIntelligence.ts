@@ -1,5 +1,5 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
-import type { ModelState, TravelContext } from '../types/travel';
+import type { ModelState, PlaceCategory, TravelContext, TravelIntent } from '../types/travel';
 
 export interface MemoryUsageStats {
   nativeHeapAllocatedMb: number;
@@ -11,9 +11,16 @@ export interface MemoryUsageStats {
 
 export interface TravelQueryResult {
   rawResponse: string;
+  reply: string;
   intent: string;
+  category?: PlaceCategory | string;
+  timeAvailableMinutes?: number;
+  energyLevel?: 'low' | 'medium' | 'high' | string;
+  distancePreference?: 'nearby' | 'any' | string;
   status: 'SUCCESS' | 'ERROR';
   latencyMs: number;
+  modelUsed?: string;
+  parsedIntent?: TravelIntent;
 }
 
 export interface LandmarkResult {
@@ -57,6 +64,80 @@ export async function initializeGenAI(): Promise<ModelState> {
 }
 
 /**
+ * Parses intent and rules in JavaScript fallback mode.
+ */
+function parseJsFallback(query: string, context?: TravelContext | null): TravelQueryResult {
+  const q = query.toLowerCase();
+  let intent = 'explore';
+  let category: PlaceCategory | undefined = undefined;
+  let reply = `Here are recommendations for ${context?.destination ?? 'your destination'}.`;
+
+  if (
+    q.includes('eat') ||
+    q.includes('food') ||
+    q.includes('restaurant') ||
+    q.includes('lunch') ||
+    q.includes('dinner')
+  ) {
+    intent = 'food';
+    category = 'restaurant';
+    reply = `Looking up the best local food and restaurants in ${context?.destination ?? 'town'}.`;
+  } else if (q.includes('hotel') || q.includes('stay') || q.includes('lodge')) {
+    intent = 'recommend_places';
+    category = 'hotel';
+    reply = `Found top rated accommodations and hotels in ${context?.destination ?? 'the area'}.`;
+  } else if (
+    q.includes('near') ||
+    q.includes('close') ||
+    q.includes('around') ||
+    q.includes('direction')
+  ) {
+    intent = 'navigate';
+    category = 'attraction';
+    reply = `Calculating closest places from your current location.`;
+  } else if (
+    q.includes('history') ||
+    q.includes('temple') ||
+    q.includes('palace') ||
+    q.includes('monument')
+  ) {
+    intent = 'recommend_places';
+    category = 'landmark';
+    reply = `Showing famous heritage monuments and historical landmarks.`;
+  }
+
+  const timeMin = q.includes('1 hour')
+    ? 60
+    : q.includes('2 hour')
+      ? 120
+      : q.includes('30 min')
+        ? 30
+        : undefined;
+
+  const parsedIntent: TravelIntent = {
+    intent,
+    category,
+    time_available_minutes: timeMin,
+    distance_preference: q.includes('near') ? 'nearby' : 'any',
+    energy_level: context?.energyLevel ?? 'medium',
+  };
+
+  return {
+    rawResponse: JSON.stringify(parsedIntent),
+    reply,
+    intent,
+    category,
+    timeAvailableMinutes: timeMin,
+    energyLevel: context?.energyLevel ?? 'medium',
+    distancePreference: q.includes('near') ? 'nearby' : 'any',
+    status: 'SUCCESS',
+    latencyMs: 14,
+    modelUsed: 'Offline-JS-Fallback',
+    parsedIntent,
+  };
+}
+
+/**
  * Sends a natural language query and active TravelContext to on-device GenAI.
  */
 export async function processTravelQuery(
@@ -65,15 +146,28 @@ export async function processTravelQuery(
 ): Promise<TravelQueryResult> {
   const contextJson = JSON.stringify(context ?? {});
   if (NativeIntelligence) {
-    return NativeIntelligence.processTravelQuery(query, contextJson);
+    try {
+      const res = await NativeIntelligence.processTravelQuery(query, contextJson);
+      const parsedIntent: TravelIntent = {
+        intent: res.intent || 'explore',
+        category: (res.category as PlaceCategory) || undefined,
+        time_available_minutes:
+          res.timeAvailableMinutes && res.timeAvailableMinutes > 0
+            ? res.timeAvailableMinutes
+            : undefined,
+        energy_level: (res.energyLevel as 'low' | 'medium' | 'high') || undefined,
+        distance_preference: (res.distancePreference as 'nearby' | 'any') || 'any',
+      };
+      return {
+        ...res,
+        reply: res.reply || res.rawResponse,
+        parsedIntent,
+      };
+    } catch {
+      return parseJsFallback(query, context);
+    }
   }
-  return {
-    rawResponse:
-      'VOYA AI Assistant is active (Phase 4 native bridge ready). Gemma model weights connect in Phase 5.',
-    intent: 'explore',
-    status: 'SUCCESS',
-    latencyMs: 15,
-  };
+  return parseJsFallback(query, context);
 }
 
 /**

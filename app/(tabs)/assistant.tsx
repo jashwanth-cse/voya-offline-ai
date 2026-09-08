@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -11,19 +13,22 @@ import {
 } from 'react-native';
 import { Colors } from '@/constants/colors';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
+import { processTravelQuery, type TravelQueryResult } from '@/services/nativeIntelligence';
 import { useTravelStore } from '@/stores/travelStore';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  result?: TravelQueryResult;
 }
 
-const MOCK_RESPONSE =
-  'AI travel assistance connects in Phase 5 when Gemma is integrated. ' +
-  'For now, explore the destination using the Explore tab. ' +
-  "Your trip context is active — I can see you're visiting " +
-  "this destination and I'm ready to help when my model loads!";
+const QUICK_PROMPTS = [
+  'What should I visit here?',
+  'Best local food & restaurants',
+  '1 hour quick highlights tour',
+  'Historical landmarks nearby',
+];
 
 export default function AssistantScreen() {
   const context = useTravelStore(s => s.context);
@@ -31,27 +36,49 @@ export default function AssistantScreen() {
     {
       id: '0',
       role: 'assistant',
-      text: `Hi! I'm VOYA, your offline AI travel companion. I'm ready to help you explore ${context?.destination ?? 'your destination'}. (Gemma integration coming in Phase 5.)`,
+      text: `Hi! I'm VOYA, your on-device AI travel companion. I run completely offline using local intelligence. Ask me anything about ${context?.destination ?? 'your destination'}!`,
     },
   ]);
   const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const listRef = useRef<FlatList>(null);
 
-  function sendMessage() {
-    const text = input.trim();
-    if (!text) return;
+  async function handleSend(textToSend?: string) {
+    const query = (textToSend ?? input).trim();
+    if (!query || isLoading) return;
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', text };
-    const asstMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      text: MOCK_RESPONSE,
+    const userMsg: Message = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      text: query,
     };
 
-    setMessages(prev => [...prev, userMsg, asstMsg]);
+    setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setIsLoading(true);
 
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+
+    try {
+      const result = await processTravelQuery(query, context);
+      const asstMsg: Message = {
+        id: `asst-${Date.now()}`,
+        role: 'assistant',
+        text: result.reply || result.rawResponse,
+        result,
+      };
+      setMessages(prev => [...prev, asstMsg]);
+    } catch {
+      const errorMsg: Message = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        text: 'Sorry, I encountered an issue processing your query offline. Please try again.',
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    }
   }
 
   return (
@@ -66,7 +93,8 @@ export default function AssistantScreen() {
       {context && (
         <View style={styles.contextBar}>
           <Text style={styles.contextText}>
-            📍 {context.destination} · ⚡ {context.energyLevel ?? 'medium'} energy
+            📍 {context.destination} · ⚡ {context.energyLevel ?? 'medium'} energy · 🔋 Offline
+            Engine
           </Text>
         </View>
       )}
@@ -84,10 +112,55 @@ export default function AssistantScreen() {
             <Text style={[styles.bubbleText, item.role === 'user' && styles.userText]}>
               {item.text}
             </Text>
+
+            {item.role === 'assistant' && item.result && (
+              <View style={styles.metaRow}>
+                <View style={styles.intentBadge}>
+                  <Text style={styles.intentText}>
+                    🏷️ {item.result.intent}
+                    {item.result.category ? ` · ${item.result.category}` : ''}
+                  </Text>
+                </View>
+                <View style={styles.latencyPill}>
+                  <Text style={styles.latencyText}>
+                    ⚡ {Math.round(item.result.latencyMs)}ms · {item.result.modelUsed ?? 'Offline'}
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
         )}
+        ListFooterComponent={
+          isLoading ? (
+            <View style={[styles.bubble, styles.asstBubble, styles.loadingBubble]}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.loadingText}>Thinking offline…</Text>
+            </View>
+          ) : null
+        }
         showsVerticalScrollIndicator={false}
       />
+
+      {/* Quick Prompts */}
+      <View style={styles.quickPromptsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsScroll}
+        >
+          {QUICK_PROMPTS.map((prompt, idx) => (
+            <TouchableOpacity
+              key={idx}
+              style={styles.chip}
+              onPress={() => handleSend(prompt)}
+              activeOpacity={0.7}
+              disabled={isLoading}
+            >
+              <Text style={styles.chipText}>{prompt}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Input */}
       <View style={styles.inputRow}>
@@ -99,9 +172,14 @@ export default function AssistantScreen() {
           placeholderTextColor={Colors.textMuted}
           multiline
           returnKeyType="send"
-          onSubmitEditing={sendMessage}
+          onSubmitEditing={() => handleSend()}
         />
-        <TouchableOpacity style={styles.sendBtn} onPress={sendMessage} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={[styles.sendBtn, (!input.trim() || isLoading) && styles.sendBtnDisabled]}
+          onPress={() => handleSend()}
+          activeOpacity={0.8}
+          disabled={!input.trim() || isLoading}
+        >
           <Text style={styles.sendIcon}>↑</Text>
         </TouchableOpacity>
       </View>
@@ -121,12 +199,18 @@ const styles = StyleSheet.create({
   contextText: { fontSize: 12, color: Colors.textSecondary },
   messageList: { padding: 16, paddingBottom: 8 },
   bubble: {
-    maxWidth: '82%',
+    maxWidth: '85%',
     borderRadius: 16,
     padding: 12,
-    marginVertical: 4,
+    marginVertical: 6,
   },
-  asstBubble: { backgroundColor: Colors.card, alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
+  asstBubble: {
+    backgroundColor: Colors.card,
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   userBubble: {
     backgroundColor: Colors.primary,
     alignSelf: 'flex-end',
@@ -134,13 +218,59 @@ const styles = StyleSheet.create({
   },
   bubbleText: { fontSize: 14, color: Colors.textSecondary, lineHeight: 21 },
   userText: { color: Colors.textPrimary },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  intentBadge: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  intentText: { fontSize: 11, color: Colors.accent, fontWeight: '600' },
+  latencyPill: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  latencyText: { fontSize: 11, color: '#f59e0b', fontWeight: '500' },
+  loadingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  loadingText: { fontSize: 13, color: Colors.textMuted },
+  quickPromptsContainer: {
+    paddingVertical: 6,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  chipsScroll: { paddingHorizontal: 12, gap: 8 },
+  chip: {
+    backgroundColor: Colors.card,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  chipText: { fontSize: 12, color: Colors.textSecondary },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: 12,
     gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
     backgroundColor: Colors.surface,
   },
   input: {
@@ -162,6 +292,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sendBtnDisabled: {
+    opacity: 0.4,
   },
   sendIcon: { fontSize: 18, color: Colors.textPrimary, fontWeight: '700' },
 });

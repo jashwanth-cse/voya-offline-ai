@@ -23,6 +23,10 @@ class ModelLifecycleManager(private val context: Context) {
 
     var onStateChanged: ((ModelState) -> Unit)? = null
 
+    val gemmaEngine = GemmaInferenceEngine(context, scope) {
+        updateState(ModelState.IDLE)
+    }
+
     fun getState(): ModelState = currentState
 
     private fun updateState(newState: ModelState) {
@@ -47,7 +51,11 @@ class ModelLifecycleManager(private val context: Context) {
             }
 
             updateState(ModelState.LOADING_GENAI)
-            // Weight initialization will hook here in Phase 5
+            val initResult = gemmaEngine.initialize()
+            if (initResult.isFailure) {
+                updateState(ModelState.ERROR)
+                return@withLock initResult
+            }
             updateState(ModelState.GENAI_ACTIVE)
             Result.success(Unit)
         } catch (e: Exception) {
@@ -63,7 +71,7 @@ class ModelLifecycleManager(private val context: Context) {
         try {
             if (currentState == ModelState.GENAI_ACTIVE || currentState == ModelState.LOADING_GENAI) {
                 updateState(ModelState.RELEASING)
-                // Clean up GenAI session
+                gemmaEngine.release()
                 updateState(ModelState.IDLE)
             }
             Result.success(Unit)
@@ -85,7 +93,7 @@ class ModelLifecycleManager(private val context: Context) {
 
             if (currentState == ModelState.GENAI_ACTIVE) {
                 updateState(ModelState.RELEASING)
-                // Clean up GenAI
+                gemmaEngine.release()
                 updateState(ModelState.IDLE)
             }
 
