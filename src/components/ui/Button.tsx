@@ -67,11 +67,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   fullWidth: { width: '100%' },
-  disabled: { opacity: 0.45 },
+  disabled: { opacity: 0.4 },
 
   // Variants
   primary: { backgroundColor: Colors.primary },
-  secondary: { backgroundColor: Colors.card },
+  secondary: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border },
   outline: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
 
   // Labels base
   label: { fontWeight: '600' },
-  label_primary: { color: Colors.textPrimary },
+  label_primary: { color: Colors.textInverse },
   label_secondary: { color: Colors.textPrimary },
   label_outline: { color: Colors.primary },
   label_ghost: { color: Colors.primary },

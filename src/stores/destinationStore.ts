@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import {
   type CategoryCounts,
+  getInstalledDestinations,
   getPlaceCounts,
+  type InstalledDestination,
   type NearbyPlace,
   queryNearbyPlaces,
   queryPlaces,
@@ -17,6 +19,8 @@ interface DestinationStore {
   activeManifest: PackManifest | null;
   /** Active list of places matching current filters/search */
   places: Place[];
+  /** List of all destinations currently saved offline in SQLite */
+  installedDestinations: InstalledDestination[];
   /** Category summary counts from SQLite */
   counts: CategoryCounts;
   /** Nearby places calculated with distance */
@@ -35,6 +39,10 @@ interface DestinationStore {
   ) => Promise<boolean>;
   /** Load all places from SQLite for a destination */
   loadPlacesFromDb: (destinationId: string, category?: PlaceCategory) => Promise<void>;
+  /** Load all installed destinations from SQLite for My Trips */
+  loadInstalledDestinations: () => Promise<void>;
+  /** Switch to an already installed destination */
+  switchDestination: (destinationId: string) => Promise<void>;
   /** Search places via SQLite LIKE query */
   searchPlaces: (query: string, destinationId?: string, category?: PlaceCategory) => Promise<void>;
   /** Load nearby places using SQLite coordinates & Haversine distance */
@@ -72,6 +80,7 @@ export const useDestinationStore = create<DestinationStore>((set, get) => ({
   destinationId: null,
   activeManifest: null,
   places: [],
+  installedDestinations: [],
   counts: DEFAULT_COUNTS,
   nearbyPlaces: [],
   downloadState: null,
@@ -91,11 +100,13 @@ export const useDestinationStore = create<DestinationStore>((set, get) => ({
       });
 
       const counts = await getPlaceCounts(manifest.destinationId);
+      const installed = await getInstalledDestinations();
 
       set({
         destinationId: manifest.destinationId,
         activeManifest: manifest,
         places,
+        installedDestinations: installed,
         counts,
         isLoading: false,
         downloadProgress: 100,
@@ -116,11 +127,35 @@ export const useDestinationStore = create<DestinationStore>((set, get) => ({
     }
   },
 
+  loadInstalledDestinations: async () => {
+    try {
+      const installed = await getInstalledDestinations();
+      set({ installedDestinations: installed });
+    } catch (error) {
+      console.error('Failed to load installed destinations:', error);
+    }
+  },
+
+  switchDestination: async (destinationId: string) => {
+    set({ isLoading: true });
+    try {
+      const destId = destinationId.toLowerCase();
+      const places = await queryPlaces({ destinationId: destId });
+      const counts = await getPlaceCounts(destId);
+      set({ destinationId: destId, places, counts, isLoading: false });
+    } catch (error) {
+      console.error('Failed to switch destination:', error);
+      set({ isLoading: false });
+    }
+  },
+
   loadPlacesFromDb: async (destinationId: string, category?: PlaceCategory) => {
     set({ isLoading: true });
     try {
-      const places = await queryPlaces({ destinationId, category });
-      set({ destinationId: destinationId.toLowerCase(), places, isLoading: false });
+      const destId = destinationId.toLowerCase();
+      const places = await queryPlaces({ destinationId: destId, category });
+      const counts = await getPlaceCounts(destId);
+      set({ destinationId: destId, places, counts, isLoading: false });
     } catch (error) {
       console.error('Failed to load places from DB:', error);
       set({ isLoading: false });

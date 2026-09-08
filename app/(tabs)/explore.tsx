@@ -3,12 +3,14 @@ import {
   ActivityIndicator,
   FlatList,
   Linking,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { CompassNavigator } from '@/components/navigation/CompassNavigator';
 import { PlaceCard } from '@/components/place/PlaceCard';
@@ -23,11 +25,21 @@ import { bearingToCardinal, calculateBearing } from '@/utils/geo';
 type Filter = 'all' | PlaceCategory;
 type SortMode = 'ai_match' | 'rating' | 'distance';
 
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'attraction', label: '🏛️ Attractions' },
-  { key: 'restaurant', label: '🍽️ Restaurants' },
-  { key: 'hotel', label: '🏨 Hotels' },
+const FILTERS: { key: Filter; label: string; icon: keyof typeof MaterialIcons.glyphMap }[] = [
+  { key: 'all', label: 'All', icon: 'grid-view' },
+  { key: 'attraction', label: 'Attractions', icon: 'account-balance' },
+  { key: 'restaurant', label: 'Restaurants', icon: 'restaurant' },
+  { key: 'hotel', label: 'Hotels', icon: 'hotel' },
+];
+
+const SORT_OPTIONS: {
+  key: SortMode;
+  label: string;
+  icon: keyof typeof MaterialIcons.glyphMap;
+}[] = [
+  { key: 'ai_match', label: 'Best Match', icon: 'auto-awesome' },
+  { key: 'rating', label: 'Top Rated', icon: 'star' },
+  { key: 'distance', label: 'Nearest', icon: 'near-me' },
 ];
 
 export default function ExploreScreen() {
@@ -65,7 +77,6 @@ export default function ExploreScreen() {
     searchPlaces(searchQuery, destinationId ?? undefined, category);
   }, [activeFilter, searchQuery, destinationId, searchPlaces]);
 
-  // Apply deterministic recommendation engine ranking
   const rankedPlaces = useMemo<RankedPlace[]>(() => {
     const ranked = rankPlaces(places, {
       userLat: context?.currentLatitude,
@@ -101,9 +112,12 @@ export default function ExploreScreen() {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Explore" />
+      <ScreenHeader
+        title="Explore"
+        subtitle={context?.destination ? `${context.destination} Guide` : undefined}
+      />
 
-      {/* Active Navigation Panel */}
+      {/* Active Navigation */}
       {activeNavigationTarget && (
         <CompassNavigator
           target={activeNavigationTarget}
@@ -111,23 +125,15 @@ export default function ExploreScreen() {
         />
       )}
 
-      {/* GPS Status Banner */}
-      <View style={styles.gpsBanner}>
-        <View style={styles.gpsIndicator}>
-          <View style={styles.gpsDot} />
-          <Text style={styles.gpsText}>
-            {userLat != null && userLon != null
-              ? `GPS: ${userLat.toFixed(4)}, ${userLon.toFixed(4)}`
-              : 'GPS: Offline Fixed Mode'}
-          </Text>
-        </View>
-        <Text style={styles.airplaneBadge}>✈️ 100% OFFLINE</Text>
-      </View>
-
-      {/* Search Bar */}
+      {/* Search Bar — Pill style matching Stitch with MaterialIcon */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <MaterialIcons
+            name="search"
+            size={20}
+            color={Colors.textMuted}
+            style={styles.searchIcon}
+          />
           <TextInput
             style={styles.searchInput}
             placeholder="Search attractions, food, hotels…"
@@ -140,80 +146,84 @@ export default function ExploreScreen() {
           {searchQuery.length > 0 && (
             <TouchableOpacity
               onPress={() => setSearchQuery('')}
-              hitSlop={8}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.clearBtn}
             >
-              <Text style={styles.clearText}>✕</Text>
+              <MaterialIcons name="close" size={16} color={Colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Filter tabs */}
-      <View style={styles.filterRow}>
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            onPress={() => setActiveFilter(f.key)}
-            style={[styles.filterChip, activeFilter === f.key && styles.filterChipActive]}
-            activeOpacity={0.75}
-          >
-            <Text style={[styles.filterText, activeFilter === f.key && styles.filterTextActive]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Category Filter Chips — Horizontal scroll with MaterialIcons */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+        style={styles.filterScroll}
+      >
+        {FILTERS.map(f => {
+          const isActive = activeFilter === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              onPress={() => setActiveFilter(f.key)}
+              style={[styles.filterChip, isActive && styles.filterChipActive]}
+              activeOpacity={0.75}
+            >
+              <MaterialIcons
+                name={f.icon}
+                size={16}
+                color={isActive ? Colors.textInverse : Colors.textSecondary}
+              />
+              <Text style={[styles.filterText, isActive && styles.filterTextActive]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
-      {/* Sorting / Status Row */}
+      {/* Status & Sort Row */}
       <View style={styles.statusRow}>
         <Text style={styles.resultCount}>
-          {rankedPlaces.length} {rankedPlaces.length === 1 ? 'place' : 'places'}
+          {isLoading ? 'Loading…' : `${rankedPlaces.length} places`}
         </Text>
-
-        <View style={styles.sortToggleRow}>
-          <TouchableOpacity
-            onPress={() => setSortMode('ai_match')}
-            style={[styles.sortChip, sortMode === 'ai_match' && styles.sortChipActive]}
-          >
-            <Text style={[styles.sortText, sortMode === 'ai_match' && styles.sortTextActive]}>
-              ⚡ AI Ranked
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setSortMode('rating')}
-            style={[styles.sortChip, sortMode === 'rating' && styles.sortChipActive]}
-          >
-            <Text style={[styles.sortText, sortMode === 'rating' && styles.sortTextActive]}>
-              ⭐ Rating
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setSortMode('distance')}
-            style={[styles.sortChip, sortMode === 'distance' && styles.sortChipActive]}
-          >
-            <Text style={[styles.sortText, sortMode === 'distance' && styles.sortTextActive]}>
-              📍 Distance
-            </Text>
-          </TouchableOpacity>
+        <View style={styles.sortRow}>
+          {SORT_OPTIONS.map(opt => {
+            const isActive = sortMode === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                onPress={() => setSortMode(opt.key)}
+                style={[styles.sortChip, isActive && styles.sortChipActive]}
+              >
+                <MaterialIcons
+                  name={opt.icon}
+                  size={13}
+                  color={isActive ? Colors.primary : Colors.textMuted}
+                />
+                <Text style={[styles.sortText, isActive && styles.sortTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          {isLoading && <ActivityIndicator size="small" color={Colors.primary} />}
         </View>
-
-        {isLoading && <ActivityIndicator size="small" color={Colors.primary} />}
       </View>
 
-      {/* Places list */}
+      {/* Places List */}
       {rankedPlaces.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>📍</Text>
+          <MaterialIcons name="map" size={48} color={Colors.textMuted} style={styles.emptyIcon} />
           <Text style={styles.emptyText}>
-            {searchQuery.trim().length > 0
-              ? 'No matching places found'
-              : 'No destination loaded yet'}
+            {searchQuery.trim().length > 0 ? 'No results found' : 'No places loaded yet'}
           </Text>
           <Text style={styles.emptySubtext}>
             {searchQuery.trim().length > 0
-              ? `No results for "${searchQuery}". Try a different keyword.`
-              : 'Download a destination pack to see places here.'}
+              ? `Nothing matched "${searchQuery}". Try a different keyword.`
+              : 'Download a destination guide to see places here.'}
           </Text>
         </View>
       ) : (
@@ -254,20 +264,20 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   searchContainer: {
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 14,
     paddingBottom: 4,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
+    backgroundColor: Colors.surface,
+    borderRadius: 28,
+    paddingHorizontal: 14,
+    height: 46,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
+  searchIcon: { marginRight: 8 },
   searchInput: {
     flex: 1,
     color: Colors.textPrimary,
@@ -275,19 +285,21 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   clearBtn: { padding: 4 },
-  clearText: { color: Colors.textMuted, fontSize: 13, fontWeight: '700' },
+
+  filterScroll: { maxHeight: 48 },
   filterRow: {
-    flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 8,
     gap: 8,
-    flexWrap: 'wrap',
   },
   filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
   },
@@ -295,8 +307,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
   },
-  filterText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
-  filterTextActive: { color: Colors.textPrimary },
+  filterText: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
+  filterTextActive: { color: Colors.textInverse },
+
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -311,21 +324,25 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontWeight: '600',
   },
-  sortToggleRow: {
+  sortRow: {
     flexDirection: 'row',
     gap: 6,
+    alignItems: 'center',
   },
   sortChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: Colors.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   sortChipActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderColor: Colors.accent,
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
   },
   sortText: {
     fontSize: 11,
@@ -333,49 +350,17 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   sortTextActive: {
-    color: Colors.accent,
+    color: Colors.primary,
     fontWeight: '700',
   },
   list: { paddingBottom: 24 },
-  gpsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(99, 102, 241, 0.08)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(99, 102, 241, 0.2)',
-  },
-  gpsIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  gpsDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10b981',
-  },
-  gpsText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  airplaneBadge: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: Colors.primary,
-    letterSpacing: 0.5,
-  },
   empty: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
   },
-  emptyIcon: { fontSize: 48, marginBottom: 16 },
+  emptyIcon: { marginBottom: 16 },
   emptyText: {
     fontSize: 17,
     fontWeight: '700',

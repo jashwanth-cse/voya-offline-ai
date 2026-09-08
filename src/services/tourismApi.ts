@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { MOCK_PLACES } from '../constants/mockData';
+import { DESTINATION_PLACES_MAP, MOCK_PLACES } from '../constants/mockData';
 import type { RawAttractionResponse, RawTourismResponse } from '../types/pack';
 import type { Place, PlaceCategory } from '../types/travel';
 
@@ -149,12 +149,19 @@ export async function fetchCityTourismData(
     );
   }
 
-  // Fallback to curated local dataset if backend is offline or empty
-  const fallbackPlaces: Place[] = MOCK_PLACES.map((p, idx) => ({
-    ...p,
-    id: `place-${city.toLowerCase()}-${idx + 1}-${p.id}`,
-    description: p.description,
-  }));
+  // Fallback to curated local dataset for this specific city
+  const citySlug = city.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const citySpecificPlaces =
+    DESTINATION_PLACES_MAP[citySlug] || DESTINATION_PLACES_MAP[city.toLowerCase()];
+
+  const fallbackPlaces: Place[] = citySpecificPlaces
+    ? citySpecificPlaces.map(p => ({ ...p }))
+    : MOCK_PLACES.map((p, idx) => ({
+        ...p,
+        id: `place-${citySlug || 'dest'}-${idx + 1}-${p.id}`,
+        name: `${p.name} (${city})`,
+        description: `Tourist attraction in ${city}`,
+      }));
 
   return { places: fallbackPlaces, isLive: false };
 }

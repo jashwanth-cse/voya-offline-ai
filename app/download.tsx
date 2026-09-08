@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { type Href, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
 import { useAppStore } from '@/stores/appStore';
 import { useDestinationStore } from '@/stores/destinationStore';
@@ -9,13 +11,12 @@ import type { DownloadProgressState } from '@/types/pack';
 
 export default function DownloadScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const context = useTravelStore(s => s.context);
   const setHasActiveTrip = useAppStore(s => s.setHasActiveTrip);
   const downloadPack = useDestinationStore(s => s.downloadPack);
 
-  const [currentMessage, setCurrentMessage] = useState(
-    'Connecting to Tourism Intelligence Service…'
-  );
+  const [currentMessage, setCurrentMessage] = useState('Getting your guide ready…');
   const [imageCounter, setImageCounter] = useState<string | null>(null);
 
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -30,14 +31,12 @@ export default function DownloadScreen() {
       const success = await downloadPack(destination, (state: DownloadProgressState) => {
         if (!isMounted) return;
 
-        // Smoothly animate progress bar
         Animated.timing(progressAnim, {
           toValue: state.percent,
           duration: 350,
           useNativeDriver: false,
         }).start();
 
-        // Fade text change
         Animated.sequence([
           Animated.timing(messageOpacity, {
             toValue: 0.3,
@@ -54,7 +53,7 @@ export default function DownloadScreen() {
         setCurrentMessage(state.message);
 
         if (state.imagesDownloaded != null && state.totalImages != null && state.totalImages > 0) {
-          setImageCounter(`Landmark photos: ${state.imagesDownloaded}/${state.totalImages}`);
+          setImageCounter(`Saving photo ${state.imagesDownloaded} of ${state.totalImages}`);
         } else {
           setImageCounter(null);
         }
@@ -64,7 +63,6 @@ export default function DownloadScreen() {
 
       if (success) {
         setHasActiveTrip(true);
-        // Short pause to show 100% completion before navigating
         await new Promise(r => setTimeout(r, 600));
         if (isMounted) {
           router.replace('/(tabs)' as Href);
@@ -85,12 +83,26 @@ export default function DownloadScreen() {
   });
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+        },
+      ]}
+    >
       <View style={styles.content}>
-        <Text style={styles.destination}>{context?.destination ?? 'Destination'}</Text>
-        <Text style={styles.title}>Preparing Offline Intelligence</Text>
+        {/* Destination chip */}
+        <View style={styles.destinationChip}>
+          <MaterialIcons name="place" size={14} color={Colors.primary} />
+          <Text style={styles.destinationText}>{context?.destination ?? 'Your destination'}</Text>
+        </View>
+
+        <Text style={styles.title}>Saving your guide</Text>
         <Text style={styles.subtitle}>
-          Downloading attractions, landmark reference photos, and building your offline database.
+          Downloading real attractions, reference photos, and offline routes so you can explore
+          without internet.
         </Text>
 
         {/* Progress Bar */}
@@ -98,7 +110,7 @@ export default function DownloadScreen() {
           <Animated.View style={[styles.barFill, { width: progressWidth }]} />
         </View>
 
-        {/* Step Indicator & Message */}
+        {/* Status */}
         <View style={styles.statusBox}>
           <ActivityIndicator size="small" color={Colors.primary} style={styles.spinner} />
           <Animated.Text style={[styles.stepText, { opacity: messageOpacity }]}>
@@ -106,16 +118,19 @@ export default function DownloadScreen() {
           </Animated.Text>
         </View>
 
-        {/* Image Download Counter */}
+        {/* Photo counter */}
         {imageCounter && (
           <View style={styles.counterBadge}>
-            <Text style={styles.counterText}>📸 {imageCounter}</Text>
+            <MaterialIcons name="photo-camera" size={14} color={Colors.textSecondary} />
+            <Text style={styles.counterText}>{imageCounter}</Text>
           </View>
         )}
 
+        {/* Offline ready note */}
         <View style={styles.offlineBanner}>
+          <MaterialIcons name="check-circle" size={18} color={Colors.success} />
           <Text style={styles.offlineNote}>
-            📡 After download, 100% of VOYA functions in Airplane mode.
+            Once saved, 100% of your guide functions completely offline.
           </Text>
         </View>
       </View>
@@ -131,42 +146,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   content: { width: '85%', alignItems: 'center' },
-  destination: {
+  destinationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  destinationText: {
     fontSize: 13,
     fontWeight: '700',
     color: Colors.primary,
-    letterSpacing: 2.5,
-    textTransform: 'uppercase',
-    marginBottom: 8,
+    textTransform: 'capitalize',
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '800',
     color: Colors.textPrimary,
     marginBottom: 10,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 19,
+    lineHeight: 21,
     marginBottom: 36,
   },
   barTrack: {
     width: '100%',
-    height: 7,
-    backgroundColor: Colors.card,
-    borderRadius: 4,
+    height: 6,
+    backgroundColor: Colors.divider,
+    borderRadius: 3,
     overflow: 'hidden',
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   barFill: {
     height: '100%',
     backgroundColor: Colors.primary,
-    borderRadius: 4,
+    borderRadius: 3,
   },
   statusBox: {
     flexDirection: 'row',
@@ -179,37 +200,45 @@ const styles = StyleSheet.create({
   spinner: { transform: [{ scale: 0.85 }] },
   stepText: {
     fontSize: 13,
-    color: Colors.textPrimary,
-    fontWeight: '600',
+    color: Colors.textSecondary,
+    fontWeight: '500',
     textAlign: 'center',
   },
   counterBadge: {
-    backgroundColor: Colors.card,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
     marginBottom: 28,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   counterText: {
     fontSize: 12,
-    color: Colors.accent,
-    fontWeight: '700',
+    color: Colors.textSecondary,
+    fontWeight: '600',
   },
   offlineBanner: {
-    backgroundColor: 'rgba(68, 204, 136, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(68, 204, 136, 0.25)',
+    borderColor: '#A7F3D0',
     marginTop: 8,
   },
   offlineNote: {
-    fontSize: 12,
+    fontSize: 13,
     color: Colors.success,
     fontWeight: '600',
     textAlign: 'center',
+    lineHeight: 19,
+    flex: 1,
   },
 });

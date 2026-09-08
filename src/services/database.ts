@@ -440,6 +440,91 @@ export async function getPlaceCounts(destinationId: string): Promise<CategoryCou
   return counts;
 }
 
+export interface InstalledDestination {
+  destinationId: string;
+  destinationName: string;
+  placeCount: number;
+  attractionCount: number;
+  restaurantCount: number;
+  hotelCount: number;
+  landmarkCount: number;
+}
+
+/**
+ * Retrieves all destinations currently stored in the local SQLite database.
+ */
+export async function getInstalledDestinations(): Promise<InstalledDestination[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    destination_id: string;
+    total: number;
+    attractions: number;
+    restaurants: number;
+    hotels: number;
+    landmarks: number;
+  }>(`
+    SELECT
+      destination_id,
+      COUNT(*) as total,
+      SUM(CASE WHEN category = 'attraction' THEN 1 ELSE 0 END) as attractions,
+      SUM(CASE WHEN category = 'restaurant' THEN 1 ELSE 0 END) as restaurants,
+      SUM(CASE WHEN category = 'hotel' THEN 1 ELSE 0 END) as hotels,
+      SUM(CASE WHEN category = 'landmark' THEN 1 ELSE 0 END) as landmarks
+    FROM places
+    GROUP BY destination_id
+    HAVING total > 0
+    ORDER BY total DESC;
+  `);
+
+  return rows.map(r => ({
+    destinationId: r.destination_id,
+    destinationName: r.destination_id.charAt(0).toUpperCase() + r.destination_id.slice(1),
+    placeCount: r.total,
+    attractionCount: r.attractions || 0,
+    restaurantCount: r.restaurants || 0,
+    hotelCount: r.hotels || 0,
+    landmarkCount: r.landmarks || 0,
+  }));
+}
+
+export interface LandmarkEntry {
+  id: string;
+  name: string;
+  destinationId: string;
+  latitude: number;
+  longitude: number;
+  description: string;
+  imageUri?: string;
+}
+
+/**
+ * Retrieves landmarks for a destination from SQLite.
+ */
+export async function getLandmarksForDestination(destinationId: string): Promise<LandmarkEntry[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    id: string;
+    destination_id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    description: string;
+    image_uri: string | null;
+  }>('SELECT * FROM landmarks WHERE destination_id = ? ORDER BY name ASC;', [
+    destinationId.toLowerCase(),
+  ]);
+
+  return rows.map(r => ({
+    id: r.id,
+    destinationId: r.destination_id,
+    name: r.name,
+    latitude: r.latitude,
+    longitude: r.longitude,
+    description: r.description,
+    imageUri: r.image_uri ?? undefined,
+  }));
+}
+
 /**
  * Clears all data for a destination or resets the database.
  */

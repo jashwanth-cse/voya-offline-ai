@@ -1,49 +1,56 @@
 /**
- * VOYA Design System — Color Palette
- * All screens and components must use these tokens.
+ * VOYA Design System — Light Theme Color Palette
+ * Source of truth: Stitch "VOYA Travel Companion App UI" project
+ * All screens and components must use these tokens exclusively.
  */
 export const Colors = {
   // Backgrounds
-  background: '#0F0F1E',
-  surface: '#1A1A2E',
-  card: '#22223B',
-  cardElevated: '#2A2A45',
+  background: '#FFFFFF',
+  surface: '#F8FAFC',
+  card: '#FFFFFF',
+  cardElevated: '#FFFFFF',
 
   // Brand
-  primary: '#4F6EF7',
-  primaryDark: '#3A55D4',
-  primaryLight: '#7B93F9',
+  primary: '#007AFF',
+  primaryDark: '#0056B3',
+  primaryLight: '#EBF5FF',
 
   // Accents
-  accent: '#FFB347',
-  accentDark: '#E09000',
-  success: '#44CC88',
-  error: '#FF5C5C',
-  warning: '#FFC107',
+  accent: '#F97316',
+  accentDark: '#C2410C',
+  success: '#10B981',
+  error: '#EF4444',
+  warning: '#F59E0B',
 
   // Text
-  textPrimary: '#F0F0FF',
-  textSecondary: '#9999BB',
-  textMuted: '#55556A',
-  textInverse: '#0F0F1E',
+  textPrimary: '#111827',
+  textSecondary: '#6B7280',
+  textMuted: '#9CA3AF',
+  textInverse: '#FFFFFF',
 
   // Borders & Dividers
-  border: '#2E2E4A',
-  divider: '#1E1E35',
+  border: '#E5E7EB',
+  divider: '#F3F4F6',
 
   // Tab / Icon
-  tabActive: '#4F6EF7',
-  tabInactive: '#55556A',
+  tabActive: '#007AFF',
+  tabInactive: '#9CA3AF',
 
-  // Category badges
-  attraction: '#4F6EF7',
-  restaurant: '#FF6B6B',
-  hotel: '#44CC88',
-  landmark: '#FFB347',
+  // Category badges (light tinted backgrounds)
+  attraction: '#007AFF',
+  restaurant: '#EF4444',
+  hotel: '#10B981',
+  landmark: '#F97316',
+
+  // Category badge backgrounds (tinted)
+  attractionBg: '#EBF5FF',
+  restaurantBg: '#FEF2F2',
+  hotelBg: '#ECFDF5',
+  landmarkBg: '#FFF7ED',
 
   // Transparent
-  overlay: 'rgba(15, 15, 30, 0.85)',
-  cardOverlay: 'rgba(34, 34, 59, 0.6)',
+  overlay: 'rgba(255, 255, 255, 0.95)',
+  cardOverlay: 'rgba(255, 255, 255, 0.80)',
 } as const;
 
 export type ColorKey = keyof typeof Colors;
