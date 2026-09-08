@@ -59,11 +59,16 @@ export interface Place {
   latitude: number;
   longitude: number;
   description: string;
+  address?: string;
   openingHours?: string;
   rating?: number;
+  reviewCount?: number;
   estimatedVisitDurationMinutes?: number;
   cuisine?: string;
   priceRange?: string;
+  imageUrl?: string;
+  imageUri?: string;
+  googleMapsUrl?: string;
 }
 
 /**

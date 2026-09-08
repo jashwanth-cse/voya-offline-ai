@@ -94,10 +94,19 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
+        {/* Destination Pack Details */}
+        <Text style={styles.sectionLabel}>INTELLIGENCE PACK</Text>
+        <Card style={styles.card}>
+          <Row label="Pack Status" value="✓ Installed Offline" />
+          <Row label="Pack Version" value="v1.0.0" />
+          <Row label="FastAPI Tourism" value="Enabled" />
+          <Row label="Offline Database" value="SQLite (WAL Mode)" />
+        </Card>
+
         {/* Phase info */}
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <Card style={styles.card}>
-          <Row label="Phase" value="1 — Application Foundation" />
+          <Row label="Phase" value="3 — Destination Intelligence Pack" />
           <Row label="AI Status" value="Offline (Phase 5)" />
           <Row label="Vision" value="Offline (Phase 9)" />
           <Row label="GPS" value="Offline (Phase 8)" />

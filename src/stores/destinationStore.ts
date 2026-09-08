@@ -1,32 +1,38 @@
 import { create } from 'zustand';
-import { MOCK_PLACES } from '../constants/mockData';
 import {
   type CategoryCounts,
   getPlaceCounts,
-  initDatabase,
   type NearbyPlace,
   queryNearbyPlaces,
   queryPlaces,
-  seedDestinationPack,
 } from '../services/database';
+import { downloadAndInstallPack, isPackInstalled, removePack } from '../services/packManager';
+import type { DownloadProgressState, PackManifest } from '../types/pack';
 import type { Place, PlaceCategory } from '../types/travel';
 
 interface DestinationStore {
-  /** Currently loaded destination name/ID */
+  /** Currently active destination name/ID */
   destinationId: string | null;
+  /** Active pack manifest if loaded */
+  activeManifest: PackManifest | null;
   /** Active list of places matching current filters/search */
   places: Place[];
   /** Category summary counts from SQLite */
   counts: CategoryCounts;
   /** Nearby places calculated with distance */
   nearbyPlaces: NearbyPlace[];
-  /** 0–100 download progress */
+  /** Detailed real-time download progress state */
+  downloadState: DownloadProgressState | null;
+  /** 0–100 download progress percentage */
   downloadProgress: number;
   /** Whether data loading/querying is in progress */
   isLoading: boolean;
 
-  /** Initialize SQLite DB and seed pack data */
-  initializeAndSeedPack: (destinationId: string) => Promise<void>;
+  /** Download and install destination pack from FastAPI or fallback */
+  downloadPack: (
+    cityName: string,
+    onProgressUpdate?: (state: DownloadProgressState) => void
+  ) => Promise<boolean>;
   /** Load all places from SQLite for a destination */
   loadPlacesFromDb: (destinationId: string, category?: PlaceCategory) => Promise<void>;
   /** Search places via SQLite LIKE query */
@@ -40,6 +46,10 @@ interface DestinationStore {
   ) => Promise<void>;
   /** Refresh category counts from SQLite */
   refreshCounts: (destinationId: string) => Promise<void>;
+  /** Check if a destination pack is already downloaded offline */
+  checkIsPackInstalled: (destinationId: string) => Promise<boolean>;
+  /** Delete an offline pack */
+  deleteOfflinePack: (destinationId: string) => Promise<void>;
 
   setDownloadProgress: (progress: number) => void;
   clearDestination: () => void;
@@ -60,28 +70,49 @@ const DEFAULT_COUNTS: CategoryCounts = {
 
 export const useDestinationStore = create<DestinationStore>((set, get) => ({
   destinationId: null,
+  activeManifest: null,
   places: [],
   counts: DEFAULT_COUNTS,
   nearbyPlaces: [],
+  downloadState: null,
   downloadProgress: 0,
   isLoading: false,
 
-  initializeAndSeedPack: async (destinationId: string) => {
-    set({ isLoading: true });
+  downloadPack: async (cityName: string, onProgressUpdate) => {
+    set({ isLoading: true, downloadProgress: 0 });
+
     try {
-      await initDatabase();
-      // Seed default pack for destination (Madurai)
-      await seedDestinationPack(destinationId, MOCK_PLACES, {
-        destination: destinationId,
-        packVersion: '1.0.0',
-        installedAt: new Date().toISOString(),
+      const { manifest, places } = await downloadAndInstallPack(cityName, state => {
+        set({
+          downloadState: state,
+          downloadProgress: state.percent,
+        });
+        onProgressUpdate?.(state);
       });
-      const places = await queryPlaces({ destinationId });
-      const counts = await getPlaceCounts(destinationId);
-      set({ destinationId, places, counts, isLoading: false });
+
+      const counts = await getPlaceCounts(manifest.destinationId);
+
+      set({
+        destinationId: manifest.destinationId,
+        activeManifest: manifest,
+        places,
+        counts,
+        isLoading: false,
+        downloadProgress: 100,
+      });
+
+      return true;
     } catch (error) {
-      console.error('Failed to initialize destination database:', error);
-      set({ isLoading: false });
+      console.error('Failed to download destination pack:', error);
+      set({
+        isLoading: false,
+        downloadState: {
+          stage: 'error',
+          message: 'Failed to prepare destination pack. Please retry.',
+          percent: 0,
+        },
+      });
+      return false;
     }
   },
 
@@ -89,7 +120,7 @@ export const useDestinationStore = create<DestinationStore>((set, get) => ({
     set({ isLoading: true });
     try {
       const places = await queryPlaces({ destinationId, category });
-      set({ destinationId, places, isLoading: false });
+      set({ destinationId: destinationId.toLowerCase(), places, isLoading: false });
     } catch (error) {
       console.error('Failed to load places from DB:', error);
       set({ isLoading: false });
@@ -133,14 +164,27 @@ export const useDestinationStore = create<DestinationStore>((set, get) => ({
     }
   },
 
+  checkIsPackInstalled: async (destinationId: string) => {
+    return isPackInstalled(destinationId);
+  },
+
+  deleteOfflinePack: async (destinationId: string) => {
+    await removePack(destinationId);
+    if (get().destinationId === destinationId.toLowerCase()) {
+      get().clearDestination();
+    }
+  },
+
   setDownloadProgress: progress => set({ downloadProgress: progress }),
 
   clearDestination: () =>
     set({
       destinationId: null,
+      activeManifest: null,
       places: [],
       counts: DEFAULT_COUNTS,
       nearbyPlaces: [],
+      downloadState: null,
       downloadProgress: 0,
     }),
 

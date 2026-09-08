@@ -16,8 +16,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 }
 
 /**
- * Initializes the database schema.
- * Creates tables for places, landmarks, and pack metadata with compound indices.
+ * Initializes the database schema with support for offline cached images and full Google Places fields.
  */
 export async function initDatabase(): Promise<void> {
   const db = await getDatabase();
@@ -33,11 +32,16 @@ export async function initDatabase(): Promise<void> {
       latitude REAL NOT NULL,
       longitude REAL NOT NULL,
       description TEXT NOT NULL,
+      address TEXT,
       opening_hours TEXT,
       rating REAL,
+      review_count INTEGER,
       estimated_visit_duration_minutes INTEGER,
       cuisine TEXT,
       price_range TEXT,
+      image_url TEXT,
+      image_uri TEXT,
+      google_maps_url TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -52,6 +56,7 @@ export async function initDatabase(): Promise<void> {
       longitude REAL NOT NULL,
       description TEXT NOT NULL,
       embedding_file TEXT,
+      image_uri TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -60,11 +65,26 @@ export async function initDatabase(): Promise<void> {
       value TEXT NOT NULL
     );
   `);
+
+  // Safe progressive column migrations if upgrading from Phase 2
+  const migrations = [
+    'ALTER TABLE places ADD COLUMN address TEXT;',
+    'ALTER TABLE places ADD COLUMN review_count INTEGER;',
+    'ALTER TABLE places ADD COLUMN image_url TEXT;',
+    'ALTER TABLE places ADD COLUMN image_uri TEXT;',
+    'ALTER TABLE places ADD COLUMN google_maps_url TEXT;',
+    'ALTER TABLE landmarks ADD COLUMN image_uri TEXT;',
+  ];
+
+  for (const sql of migrations) {
+    try {
+      await db.execAsync(sql);
+    } catch {
+      // Column already exists, ignore
+    }
+  }
 }
 
-/**
- * Raw database record interface matching SQLite columns.
- */
 interface PlaceRow {
   id: string;
   destination_id: string;
@@ -73,11 +93,16 @@ interface PlaceRow {
   latitude: number;
   longitude: number;
   description: string;
+  address: string | null;
   opening_hours: string | null;
   rating: number | null;
+  review_count: number | null;
   estimated_visit_duration_minutes: number | null;
   cuisine: string | null;
   price_range: string | null;
+  image_url: string | null;
+  image_uri: string | null;
+  google_maps_url: string | null;
 }
 
 function mapRowToPlace(row: PlaceRow): Place {
@@ -88,11 +113,16 @@ function mapRowToPlace(row: PlaceRow): Place {
     latitude: row.latitude,
     longitude: row.longitude,
     description: row.description,
+    address: row.address ?? undefined,
     openingHours: row.opening_hours ?? undefined,
     rating: row.rating ?? undefined,
+    reviewCount: row.review_count ?? undefined,
     estimatedVisitDurationMinutes: row.estimated_visit_duration_minutes ?? undefined,
     cuisine: row.cuisine ?? undefined,
     priceRange: row.price_range ?? undefined,
+    imageUrl: row.image_url ?? undefined,
+    imageUri: row.image_uri ?? undefined,
+    googleMapsUrl: row.google_maps_url ?? undefined,
   };
 }
 
@@ -112,24 +142,48 @@ export async function seedDestinationPack(
       await db.runAsync(
         `INSERT OR REPLACE INTO places (
           id, destination_id, name, category, latitude, longitude,
-          description, opening_hours, rating, estimated_visit_duration_minutes,
-          cuisine, price_range
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          description, address, opening_hours, rating, review_count,
+          estimated_visit_duration_minutes, cuisine, price_range,
+          image_url, image_uri, google_maps_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           place.id,
-          destinationId,
+          destinationId.toLowerCase(),
           place.name,
           place.category,
           place.latitude,
           place.longitude,
           place.description,
+          place.address ?? null,
           place.openingHours ?? null,
           place.rating ?? null,
+          place.reviewCount ?? null,
           place.estimatedVisitDurationMinutes ?? null,
           place.cuisine ?? null,
           place.priceRange ?? null,
+          place.imageUrl ?? null,
+          place.imageUri ?? null,
+          place.googleMapsUrl ?? null,
         ]
       );
+
+      // If attraction or landmark, also track in landmarks table
+      if (place.category === 'attraction' || place.category === 'landmark') {
+        await db.runAsync(
+          `INSERT OR REPLACE INTO landmarks (
+            id, destination_id, name, latitude, longitude, description, image_uri
+          ) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+          [
+            place.id,
+            destinationId.toLowerCase(),
+            place.name,
+            place.latitude,
+            place.longitude,
+            place.description,
+            place.imageUri ?? null,
+          ]
+        );
+      }
     }
 
     // Save pack metadata
@@ -164,7 +218,7 @@ export async function queryPlaces(filters: PlaceFilters = {}): Promise<Place[]> 
 
   if (filters.destinationId) {
     conditions.push('destination_id = ?');
-    params.push(filters.destinationId);
+    params.push(filters.destinationId.toLowerCase());
   }
 
   if (filters.category) {
@@ -179,8 +233,8 @@ export async function queryPlaces(filters: PlaceFilters = {}): Promise<Place[]> 
 
   if (filters.query && filters.query.trim()) {
     const q = `%${filters.query.trim()}%`;
-    conditions.push('(name LIKE ? OR description LIKE ? OR cuisine LIKE ?)');
-    params.push(q, q, q);
+    conditions.push('(name LIKE ? OR description LIKE ? OR address LIKE ? OR cuisine LIKE ?)');
+    params.push(q, q, q, q);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -198,14 +252,13 @@ export async function queryPlaces(filters: PlaceFilters = {}): Promise<Place[]> 
   return rows.map(mapRowToPlace);
 }
 
-/**
- * Queries places near a given latitude/longitude coordinate within a specified radius in kilometers.
- * Uses bounding-box coordinate pre-filtering followed by exact Haversine distance ranking.
- */
 export interface NearbyPlace extends Place {
   distanceKm: number;
 }
 
+/**
+ * Queries places near a given latitude/longitude coordinate within a specified radius in kilometers.
+ */
 export async function queryNearbyPlaces(
   lat: number,
   lon: number,
@@ -251,9 +304,6 @@ export async function getPlaceById(id: string): Promise<Place | null> {
   return row ? mapRowToPlace(row) : null;
 }
 
-/**
- * Returns category count summary for a given destination.
- */
 export interface CategoryCounts {
   attractions: number;
   restaurants: number;
@@ -266,7 +316,7 @@ export async function getPlaceCounts(destinationId: string): Promise<CategoryCou
   const db = await getDatabase();
   const rows = await db.getAllAsync<{ category: string; count: number }>(
     `SELECT category, COUNT(*) as count FROM places WHERE destination_id = ? GROUP BY category;`,
-    [destinationId]
+    [destinationId.toLowerCase()]
   );
 
   const counts: CategoryCounts = {
@@ -289,13 +339,19 @@ export async function getPlaceCounts(destinationId: string): Promise<CategoryCou
 }
 
 /**
- * Clears all data for a destination or resets the entire database.
+ * Clears all data for a destination or resets the database.
  */
-export async function clearDatabase(): Promise<void> {
+export async function clearDatabase(destinationId?: string): Promise<void> {
   const db = await getDatabase();
-  await db.execAsync(`
-    DELETE FROM places;
-    DELETE FROM landmarks;
-    DELETE FROM pack_metadata;
-  `);
+  if (destinationId) {
+    const id = destinationId.toLowerCase();
+    await db.runAsync('DELETE FROM places WHERE destination_id = ?;', [id]);
+    await db.runAsync('DELETE FROM landmarks WHERE destination_id = ?;', [id]);
+  } else {
+    await db.execAsync(`
+      DELETE FROM places;
+      DELETE FROM landmarks;
+      DELETE FROM pack_metadata;
+    `);
+  }
 }
